@@ -1,0 +1,2 @@
+# VisualNovelTransleter
+VisualNovelTransleter
