@@ -3,11 +3,11 @@ import pyautogui
 import pytesseract
 import keyboard
 from deep_translator import GoogleTranslator
-from PIL import ImageGrab, Image
 import configparser
 import os
 import threading
 import time
+from pynput import mouse  # Add this import for mouse button detection
 
 # Konfiguracja ścieżki do Tesseract
 pytesseract.pytesseract.tesseract_cmd = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
@@ -15,15 +15,15 @@ pytesseract.pytesseract.tesseract_cmd = r'C:\\Program Files\\Tesseract-OCR\\tess
 # Domyślne ustawienia
 config = {
     'Settings': {
-        'source_language': 'auto',
+        'source_language': 'english',
         'target_language': 'pl',
         'text_color': '#FFFFFF',
         'background_color': '#333333',
         'opacity': '0.85',
-        'font_size': '12',
-        'hotkey': 'alt+t',
-        'screenshot_hotkey': 'alt+s',
-        'display_time': '5'  # Dodane ustawienie czasu wyświetlania (w sekundach)
+        'font_size': '13',
+        'hotkey': 'mouse4',
+        'screenshot_hotkey': 'alt+w',
+        'display_time': '10'
     }
 }
 
@@ -85,6 +85,25 @@ class OverlayTranslator:
         # Konfiguracja skrótów klawiszowych
         self.setup_hotkeys()
 
+        # Konfiguracja nasłuchiwania myszy
+        self.setup_mouse_listener()
+
+    def setup_mouse_listener(self):
+        # Inicjalizacja nasłuchiwania myszy w oddzielnym wątku
+        self.mouse_listener = mouse.Listener(on_click=self.on_mouse_click)
+        self.mouse_listener.daemon = True  # Wątek będzie zakończony razem z głównym programem
+        self.mouse_listener.start()
+
+    def on_mouse_click(self, x, y, button, pressed):
+        # Sprawdź czy to naciśnięcie (nie puszczenie) przycisku
+        if pressed:
+            # Sprawdź czy to przycisk mouse4 (zwykle xbutton1)
+            if button == mouse.Button.x1 and self.config['Settings']['hotkey'] == 'mouse4':
+                self.capture_and_translate()
+            # Możesz też obsłużyć mouse5 (zwykle xbutton2) jeśli potrzeba
+            elif button == mouse.Button.x2 and self.config['Settings']['hotkey'] == 'mouse5':
+                self.capture_and_translate()
+
     def create_main_window(self):
         # Ramka główna
         main_frame = tk.Frame(self.root, bg="#F0F0F0")
@@ -144,7 +163,7 @@ class OverlayTranslator:
         # Utworzenie okna nakładki
         self.overlay = tk.Toplevel(self.root)
         self.overlay.title("Tłumaczenie")
-        self.overlay.geometry("400x100+200+300")
+        self.overlay.geometry("600x200+200+300")
         self.overlay.overrideredirect(True)  # Ukrycie ramki okna
         self.overlay.attributes("-topmost", True)  # Zawsze na wierzchu
 
@@ -185,8 +204,10 @@ class OverlayTranslator:
         self.overlay.withdraw()
 
     def setup_hotkeys(self):
-        # Ustawienie skrótów klawiszowych
-        keyboard.add_hotkey(self.config['Settings']['hotkey'], self.capture_and_translate)
+        # Ustawienie skrótów klawiszowych (tylko dla standardowych klawiszy, nie myszy)
+        if self.config['Settings']['hotkey'] not in ['mouse4', 'mouse5']:
+            keyboard.add_hotkey(self.config['Settings']['hotkey'], self.capture_and_translate)
+
         keyboard.add_hotkey(self.config['Settings']['screenshot_hotkey'], self.take_screenshot)
 
     def start_drag(self, event):
@@ -377,22 +398,27 @@ class OverlayTranslator:
         hotkeys_frame = tk.LabelFrame(settings_frame, text="Skróty klawiszowe", padx=10, pady=10)
         hotkeys_frame.pack(fill=tk.X, pady=5)
 
-
         translate_hotkey_label = tk.Label(hotkeys_frame, text="Skrót do tłumaczenia:")
         translate_hotkey_label.grid(row=0, column=0, sticky=tk.W, pady=5)
 
-        translate_hotkey_var = tk.StringVar(value=self.config['Settings']['hotkey'])
-        translate_hotkey_entry = tk.Entry(hotkeys_frame, textvariable=translate_hotkey_var)
-        translate_hotkey_entry.grid(row=0, column=1, sticky=tk.W + tk.E, pady=5)
+        # Lista możliwych przycisków myszy
+        mouse_buttons = ['', 'mouse4', 'mouse5']
+        all_hotkeys = [''] + mouse_buttons + ['alt+a', 'alt+b', 'alt+c', 'alt+d', 'ctrl+a', 'ctrl+b', 'ctrl+c', 'ctrl+d']
 
+        translate_hotkey_var = tk.StringVar(value=self.config['Settings']['hotkey'])
+        translate_hotkey_combo = tk.OptionMenu(hotkeys_frame, translate_hotkey_var, *all_hotkeys)
+        translate_hotkey_combo.grid(row=0, column=1, sticky=tk.W + tk.E, pady=5)
 
         screenshot_hotkey_label = tk.Label(hotkeys_frame, text="Skrót do zrzutu ekranu:")
         screenshot_hotkey_label.grid(row=1, column=0, sticky=tk.W, pady=5)
 
         screenshot_hotkey_var = tk.StringVar(value=self.config['Settings']['screenshot_hotkey'])
-        screenshot_hotkey_entry = tk.Entry(hotkeys_frame, textvariable=screenshot_hotkey_var)
-        screenshot_hotkey_entry.grid(row=1, column=1, sticky=tk.W + tk.E, pady=5)
+        screenshot_hotkey_combo = tk.OptionMenu(hotkeys_frame, screenshot_hotkey_var, *all_hotkeys)
+        screenshot_hotkey_combo.grid(row=1, column=1, sticky=tk.W + tk.E, pady=5)
 
+        # Informacja o przyciskach myszy
+        mouse_info_label = tk.Label(hotkeys_frame, text="mouse4/5 to dodatkowe przyciski myszy", fg="#666666")
+        mouse_info_label.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=5)
 
         button_frame = tk.Frame(settings_frame)
         button_frame.pack(fill=tk.X, pady=10)
@@ -408,18 +434,36 @@ class OverlayTranslator:
 
             self.display_time = int(self.config['Settings']['display_time'])
 
-            if self.config['Settings']['hotkey'] != translate_hotkey_var.get() or \
-                    self.config['Settings']['screenshot_hotkey'] != screenshot_hotkey_var.get():
+            # Usuń wszystkie skróty klawiaturowe
+            try:
+                if self.config['Settings']['hotkey'] not in ['mouse4', 'mouse5']:
+                    keyboard.remove_hotkey(self.config['Settings']['hotkey'])
 
-                keyboard.remove_hotkey(self.config['Settings']['hotkey'])
                 keyboard.remove_hotkey(self.config['Settings']['screenshot_hotkey'])
+            except Exception:
+                pass  # Ignorujemy błędy, gdyż skrót mógł nie istnieć
 
-                self.config['Settings']['hotkey'] = translate_hotkey_var.get()
-                self.config['Settings']['screenshot_hotkey'] = screenshot_hotkey_var.get()
+            # Zapisz nowe skróty
+            old_hotkey = self.config['Settings']['hotkey']
+            new_hotkey = translate_hotkey_var.get()
 
-                keyboard.add_hotkey(self.config['Settings']['hotkey'], self.capture_and_translate)
-                keyboard.add_hotkey(self.config['Settings']['screenshot_hotkey'], self.take_screenshot)
+            self.config['Settings']['hotkey'] = new_hotkey
+            self.config['Settings']['screenshot_hotkey'] = screenshot_hotkey_var.get()
 
+            # Dodaj nowe skróty klawiaturowe (tylko dla standardowych klawiszy)
+            if new_hotkey not in ['mouse4', 'mouse5']:
+                keyboard.add_hotkey(new_hotkey, self.capture_and_translate)
+
+            keyboard.add_hotkey(self.config['Settings']['screenshot_hotkey'], self.take_screenshot)
+
+            # Zrestartuj nasłuchiwacz myszy jeśli zmieniły się skróty myszy
+            if (old_hotkey in ['mouse4', 'mouse5'] and new_hotkey not in ['mouse4', 'mouse5']) or \
+                    (old_hotkey not in ['mouse4', 'mouse5'] and new_hotkey in ['mouse4', 'mouse5']):
+                try:
+                    self.mouse_listener.stop()
+                    self.setup_mouse_listener()
+                except Exception:
+                    pass
 
             save_config(self.config)
 
